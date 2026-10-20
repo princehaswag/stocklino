@@ -307,6 +307,18 @@ input[type=checkbox],input[type=radio]{width:auto;height:auto}
 .grade-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .grade-btns .lbl{margin-right:2px}
 .tam-pick span{font-family:var(--f-mono);font-weight:600;min-width:48px;justify-content:center;padding:0 10px}
+.ls-cores{display:flex;flex-direction:column;gap:7px;background:var(--sunken);border-radius:8px;padding:10px}
+.ls-cor{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:8px;align-items:center;font-size:14px}.ls-cor select{height:36px}
+.lsg{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.lsg-h{display:flex;gap:10px;align-items:center}.lsg-h select{flex:1;font-weight:600}.lsg-t{flex:none;font-weight:600}
+.lsb{display:flex;flex-direction:column;gap:4px}.lsb+.lsb{border-top:1px dashed var(--line);padding-top:8px}
+.lsb-h{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}.lsb-h .tm{font-size:12px;margin:0}
+.ls-warn{color:var(--warn);font-weight:600}
+.lsi{display:grid;grid-template-columns:34px minmax(0,1fr) minmax(0,1.4fr);gap:2px 8px;align-items:center;padding:4px 6px;border-radius:7px}
+.lsi.bad{background:var(--crit-soft)}
+.lsi-q{font-weight:600;text-align:right;font-size:15px}.lsi-t{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.lsi-c{display:flex;gap:6px;align-items:center;min-width:0}.lsi-c select{height:34px;font-size:14px;padding:0 6px;min-width:0}
+.lsi-s{grid-column:2/-1;font-size:12px;color:var(--muted)}.lsi-s b{color:var(--crit)}
 .size-mix{display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--line);padding-top:10px}
 </style>
 </head>
@@ -397,6 +409,12 @@ function put(c,id,data){if(semConexao())return;const d={...data};delete d.id;S[c
  enfileirar(c+'/'+id,async()=>okOuErro(await sb.from(c).upsert({id,data:d})))}
 function del(c,id){if(semConexao())return;delete S[c][id];agendar();
  enfileirar(c+'/'+id,async()=>okOuErro(await sb.from(c).delete().eq('id',id)))}
+function putMuitos(c,docs){if(semConexao())return;docs.forEach(d=>{S[c][d.id]={...d}});agendar();
+ const rows=docs.map(d=>{const x={...d};delete x.id;return {id:d.id,data:x}});
+ for(let i=0;i<rows.length;i+=200){const parte=rows.slice(i,i+200);const k=c+'/lote-'+uid();parte.forEach(r=>{pendDoc[c+'/'+r.id]=(pendDoc[c+'/'+r.id]||0)+1});
+  enfileirar(k,async()=>okOuErro(await sb.from(c).upsert(parte))).finally(()=>parte.forEach(r=>{pendDoc[c+'/'+r.id]--}))}}
+function delMuitos(c,ids){if(semConexao())return;ids.forEach(id=>delete S[c][id]);agendar();
+ for(let i=0;i<ids.length;i+=200){const parte=ids.slice(i,i+200);enfileirar(c+'/lote-'+uid(),async()=>okOuErro(await sb.from(c).delete().in('id',parte)))}}
 /* ajuste de quantidade: lê a versão atual no servidor, aplica a diferença e só grava se ninguém mexeu no meio */
 function ajustarDoc(c,id,aplicar){if(semConexao())return;const loc=S[c][id];if(!loc)return;S[c][id]={...aplicar(loc),id};agendar();
  enfileirar(c+'/'+id,async()=>{for(let i=0;i<6;i++){
@@ -406,11 +424,11 @@ function ajustarDoc(c,id,aplicar){if(semConexao())return;const loc=S[c][id];if(!
   if(u.data&&u.data.length){S[c][id]={...u.data[0].data,id};agendar();return}
   await new Promise(res=>setTimeout(res,150+Math.random()*300))}
   throw {code:'conflito'}})}
-function aplicarDelta(p,cor,delta,tam){const cores=(p.cores||[]).map(c=>({...c,tam:c.tam?{...c.tam}:undefined}));let c=cores.find(x=>norm(x.nome)===norm(cor));if(!c){c={nome:String(cor).toLowerCase(),qtd:0};cores.push(c)}
- if(temTam(p)){const k=tam&&(p.tamanhos.includes(tam)||tam===ST)?tam:ST;c.tam=c.tam||{};c.tam[k]=Math.max(0,(+c.tam[k]||0)+delta);c.qtd=soma(Object.values(c.tam))}
- else{c.qtd=Math.max(0,(+c.qtd||0)+delta);delete c.tam}
+function aplicarDelta(p,cor,delta,tam,neg){const lim=v=>neg?v:Math.max(0,v);const cores=(p.cores||[]).map(c=>({...c,tam:c.tam?{...c.tam}:undefined}));let c=cores.find(x=>norm(x.nome)===norm(cor));if(!c){c={nome:String(cor).toLowerCase(),qtd:0};cores.push(c)}
+ if(temTam(p)){const k=tam&&(p.tamanhos.includes(tam)||tam===ST)?tam:ST;c.tam=c.tam||{};c.tam[k]=lim((+c.tam[k]||0)+delta);c.qtd=soma(Object.values(c.tam))}
+ else{c.qtd=lim((+c.qtd||0)+delta);delete c.tam}
  if(c.tam===undefined)delete c.tam;return {...p,cores}}
-function ajustarEstoque(pid,cor,delta,tam){ajustarDoc('produtos',pid,p=>aplicarDelta(p,cor,delta,tam))}
+function ajustarEstoque(pid,cor,delta,tam,neg){ajustarDoc('produtos',pid,p=>aplicarDelta(p,cor,delta,tam,neg))}
 function ajustarTecido(tid,delta){ajustarDoc('tecidos',tid,t=>({...t,qtd:r2(Math.max(0,(+t.qtd||0)+delta))}))}
 
 async function buscarTudo(){const novo={};for(const c of COLS){novo[c]={};for(let de=0;;de+=1000){
@@ -473,7 +491,7 @@ function render(){
 const head=(eb,t,acts='')=>`<div><div class="page-head"><div class="t"><div class="eyebrow">${eb}</div><h1>${t}</h1></div>${acts?`<div class="actions">${acts}</div>`:''}</div><div class="regua" style="margin-top:12px"></div></div>`;
 const ICON_PLUS='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
 
-function chipsCores(p){return (p.cores||[]).map(c=>`<span class="cchip ${c.qtd==0?'zero':c.qtd<=3?'low':''}">${sw(c.nome)}${esc(cap(c.nome))} <b>${fmt(c.qtd)}</b></span>`).join('')}
+function chipsCores(p){return (p.cores||[]).map(c=>`<span class="cchip ${c.qtd<=0?'zero':c.qtd<=3?'low':''}">${sw(c.nome)}${esc(cap(c.nome))} <b>${fmt(c.qtd)}</b></span>`).join('')}
 
 /* Painel */
 function vPainel(){
@@ -483,7 +501,7 @@ function vPainel(){
  const lim=isoDe(new Date(Date.now()-29*864e5));
  const saidas30=soma(lista('movimentos').filter(m=>m.tipo==='saida'&&m.data>=lim).map(m=>m.qtd));
  const d=new Date();const dataTxt=`${d.getDate()} de ${['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'][d.getMonth()]}`;
- return head(`Hoje, ${dataTxt}`,'Visão geral',`<button class="btn" data-act="mov" data-t="entrada">${ICON_PLUS}Entrada</button><button class="btn" data-act="mov" data-t="saida">Saída</button><button class="btn primary" data-act="novaLeva">${ICON_PLUS}Nova leva</button>`)+
+ return head(`Hoje, ${dataTxt}`,'Visão geral',`<button class="btn" data-act="mov" data-t="entrada">${ICON_PLUS}Entrada</button><button class="btn" data-act="mov" data-t="saida">Saída</button><button class="btn" data-act="lista">Saída por lista</button><button class="btn primary" data-act="novaLeva">${ICON_PLUS}Nova leva</button>`)+
  `<div class="kpis">
    <div class="kpi"><div class="l">Peças em estoque</div><div class="v">${fmt(soma(prods.map(totalProd)))}</div><div class="s">${prods.length} produto${prods.length===1?'':'s'}</div></div>
    <div class="kpi"><div class="l">Em produção</div><div class="v">${fmt(pecasProd)}</div><div class="s">${ativas.length} leva${ativas.length===1?'':'s'} com costureiras</div></div>
@@ -520,7 +538,7 @@ function vProdutos(){
 }
 
 function gradeTabela(p){const cols=colunasTam(p);
- const cel=v=>`<td class="n ${v==0?'z':v<=2?'l':''}">${fmt(v)}</td>`;
+ const cel=v=>`<td class="n ${v<=0?'z':v<=2?'l':''}">${fmt(v)}</td>`;
  const totCol=t=>soma((p.cores||[]).map(c=>+(c.tam&&c.tam[t])||0));
  return `<div class="gt-wrap"><table class="gt"><thead><tr><th>Cor</th>${cols.map(t=>`<th>${esc(tamLbl(t))}</th>`).join('')}<th class="t">Total</th></tr></thead>
   <tbody>${(p.cores||[]).map(c=>`<tr><td>${sw(c.nome)}${esc(cap(c.nome))}</td>${cols.map(t=>cel(+(c.tam&&c.tam[t])||0)).join('')}<td class="t">${fmt(c.qtd)}</td></tr>`).join('')}
@@ -533,12 +551,12 @@ function vEstoque(){
  if(F.movTipo!=='todos')movs=movs.filter(m=>m.tipo===F.movTipo);
  if(F.movProd)movs=movs.filter(m=>m.produtoId===F.movProd);
  const total=movs.length;movs=movs.slice(0,200);
- return head('Movimentações','Entradas e saídas',`<button class="btn" data-act="mov" data-t="entrada">${ICON_PLUS}Registrar entrada</button><button class="btn primary" data-act="mov" data-t="saida">Registrar saída</button>`)+
+ return head('Movimentações','Entradas e saídas',`<button class="btn" data-act="mov" data-t="entrada">${ICON_PLUS}Registrar entrada</button><button class="btn" data-act="mov" data-t="saida">Registrar saída</button><button class="btn primary" data-act="lista">Saída por lista</button>`)+
  `<div class="filters">
    <div class="seg-mini" role="group" aria-label="Tipo">${[['todos','Todas'],['entrada','Entradas'],['saida','Saídas']].map(([k,l])=>`<button data-act="fMovTipo" data-v="${k}" aria-pressed="${F.movTipo===k}">${l}</button>`).join('')}</div>
    <label class="field" style="flex:0 1 280px"><span class="lbl" style="font-family:var(--f-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:400">Produto</span><select id="f-movprod" data-chg="fMovProd"><option value="">Todos os produtos</option>${prods.map(p=>`<option value="${p.id}" ${F.movProd===p.id?'selected':''}>${esc(p.nome)}</option>`).join('')}</select></label>
  </div>
- ${movs.length?`<div class="panel list">${movs.map(m=>{const [y,mo,d]=(m.data||'--').split('-');return `<div class="li"><div class="dt"><b>${d||''}</b>${MESES[(+mo||1)-1]}</div><div class="main"><div class="t1">${esc(m.produtoNome||S.produtos[m.produtoId]?.nome||'Produto removido')}</div><div class="t2"><span class="pill ${m.tipo==='entrada'?'in':'out'}" style="height:20px;font-size:11px">${m.tipo==='entrada'?'Entrada':'Saída'}</span><span style="display:inline-flex;gap:5px;align-items:center">${sw(m.cor)}${rotulo(m.cor,m.tam)}</span>${m.obs?`<span>${esc(m.obs)}</span>`:''}</div></div><div style="display:flex;align-items:center;gap:4px"><span class="qty ${m.tipo==='entrada'?'in':'out'}">${m.tipo==='entrada'?'+':'−'}${fmt(m.qtd)}</span><button class="icon-btn" data-act="delMov" data-id="${m.id}" aria-label="Excluir movimentação">×</button></div></div>`}).join('')}</div>${total>200?`<p class="hint">Mostrando as 200 mais recentes de ${total}.</p>`:''}`
+ ${movs.length?`<div class="panel list">${movs.map(m=>{const [y,mo,d]=(m.data||'--').split('-');return `<div class="li"><div class="dt"><b>${d||''}</b>${MESES[(+mo||1)-1]}</div><div class="main"><div class="t1">${esc(m.produtoNome||S.produtos[m.produtoId]?.nome||'Produto removido')}</div><div class="t2"><span class="pill ${m.tipo==='entrada'?'in':'out'}" style="height:20px;font-size:11px">${m.tipo==='entrada'?'Entrada':'Saída'}</span><span style="display:inline-flex;gap:5px;align-items:center">${sw(m.cor)}${rotulo(m.cor,m.tam)}</span>${m.loteId?'<span class="pill" style="height:20px;font-size:11px;background:var(--sunken);color:var(--muted)">lista</span>':''}${m.obs?`<span>${esc(m.obs)}</span>`:''}</div></div><div style="display:flex;align-items:center;gap:4px"><span class="qty ${m.tipo==='entrada'?'in':'out'}">${m.tipo==='entrada'?'+':'−'}${fmt(m.qtd)}</span><button class="icon-btn" data-act="delMov" data-id="${m.id}" aria-label="Excluir movimentação">×</button></div></div>`}).join('')}</div>${total>200?`<p class="hint">Mostrando as 200 mais recentes de ${total}.</p>`:''}`
  :`<div class="panel empty"><b>Nenhuma movimentação${F.movTipo!=='todos'||F.movProd?' com esses filtros':''}</b>Registre uma entrada quando receber peças, ou uma saída ao enviar uma venda.</div>`}`;
 }
 
@@ -694,6 +712,7 @@ function formMov(tipo,prodId){
   <div class="seg" role="radiogroup" aria-label="Tipo de movimentação">
    <label><input type="radio" name="tipo" value="entrada" ${tipo!=='saida'?'checked':''}><span>Entrada<small>Peças prontas recebidas</small></span></label>
    <label><input type="radio" name="tipo" value="saida" ${tipo==='saida'?'checked':''}><span>Saída<small>Peças enviadas após venda</small></span></label></div>
+  <button type="button" class="link" data-act="lista" style="align-self:flex-start">Tem uma lista de separação? Cole a lista inteira</button>
   <label class="field"><span>Produto</span><select id="m-prod">${prods.map(p=>`<option value="${p.id}" ${p.id===prodId?'selected':''}>${esc(p.nome)}</option>`).join('')}</select></label>
   <div class="field"><span class="lbl">Cor</span><div id="m-cores" class="cor-pick" role="radiogroup" aria-label="Cor"></div></div>
   <div class="field" id="m-tamf" hidden><span class="lbl">Tamanho</span><div id="m-tams" class="cor-pick tam-pick" role="radiogroup" aria-label="Tamanho"></div></div>
@@ -726,6 +745,124 @@ function formMov(tipo,prodId){
    ajustarEstoque(pid,c,t==='saida'?-n:n,tm);fechar();toast(`${t==='saida'?'Saída':'Entrada'} de ${n} peça${n===1?'':'s'} registrada`)};
  });
 }
+
+/* ---------- saída por lista de separação ---------- */
+const TAMS_CONHECIDOS=new Set(GRADES.flatMap(g=>g[1]).concat(['XG','XXG','EG','EGG','G1','G2','G3','G4','UN','U','ÚNICO','UNICO']));
+function acharProduto(txt){const n=norm(txt).replace(/[:\-–—.]+$/,'').trim();if(!n)return null;const ps=lista('produtos');
+ const ex=ps.find(p=>norm(p.nome)===n);if(ex)return ex;
+ const c=ps.filter(p=>{const pn=norm(p.nome);return n.startsWith(pn+' ')||pn.startsWith(n+' ')});return c.length===1?c[0]:null}
+function ordenarTams(l){const ref=GRADES.flatMap(g=>g[1]);const pos=t=>{const i=ref.indexOf(String(t).toUpperCase());return i<0?999:i};return [...l].sort((x,y)=>pos(x)-pos(y)||String(x).localeCompare(String(y),'pt-BR',{numeric:true}))}
+function lerLista(texto){
+ const grupos=[];let g=null,bloco=null;const ignoradas=[];
+ const novoGrupo=(titulo,pid)=>{g={titulo,pid,blocos:[]};grupos.push(g);bloco=null};
+ const novoBloco=(tam,decl)=>{if(!g)novoGrupo('',null);bloco={tam,declarado:decl,itens:[]};g.blocos.push(bloco)};
+ const tamanhosDe=()=>{const p=g&&S.produtos[g.pid];return temTam(p)?p.tamanhos.map(t=>t.toUpperCase()):[]};
+ const ehTam=(t,comContagem)=>{t=t.toUpperCase();return tamanhosDe().includes(t)||TAMS_CONHECIDOS.has(t)||(comContagem&&t.length<=4)};
+ const addItem=(qtd,txt,linha)=>{txt=txt.trim().replace(/^[-–—:x×]\s*/i,'').replace(/[.;,]+$/,'').trim();let tam=null;
+  const pal=txt.split(/\s+/);if(pal.length>1){const ult=pal[pal.length-1].toUpperCase();if(tamanhosDe().includes(ult)){tam=ult;txt=pal.slice(0,-1).join(' ')}}
+  if(!bloco||tam){novoBloco(tam||null,null)}
+  bloco.itens.push({qtd,txt,linha})};
+ String(texto||'').split(/\r?\n/).forEach((bruta,i)=>{
+  const l=bruta.replace(/\t/g,' ').replace(/^\s*[•\-*·]\s+/,'').trim();if(!l)return;
+  let m=/^([A-Za-z0-9]{1,5})\s*(?:\(\s*(\d+)\s*\)|-\s*(\d+)\s*(?:p[cç]s?|pe[cç]as?)?)?\s*:?$/i.exec(l);
+  if(m&&(m[2]||m[3]||!/^\d+$/.test(m[1])||ehTam(m[1]))&&ehTam(m[1],!!(m[2]||m[3]))&&!acharProduto(l)){novoBloco(m[1].toUpperCase(),+(m[2]||m[3])||null);return}
+  m=/^(\d+)\s*(?:x|×|un\.?|unid\.?|p[cç]s?\.?|pe[cç]as?)?\s*[-–:]?\s*(\D.*)$/i.exec(l);
+  if(m){addItem(+m[1],m[2],i+1);return}
+  const p=acharProduto(l);if(p){novoGrupo(p.nome,p.id);return}
+  m=/^(\D.*?)\s*[-–:x×]?\s*(\d+)\s*(?:p[cç]s?|pe[cç]as?|un)?\.?$/i.exec(l);
+  if(m&&g){addItem(+m[2],m[1],i+1);return}
+  if(/\d/.test(l)&&g){ignoradas.push({linha:i+1,txt:l});return}
+  novoGrupo(l.replace(/[:\-–—]+$/,'').trim(),null)});
+ grupos.forEach(gr=>{gr.blocos=gr.blocos.filter(b=>b.itens.length||b.declarado)});
+ return {grupos:grupos.filter(gr=>gr.blocos.length),ignoradas}}
+function resolverCor(p,txt){if(!p)return {cor:null};const w=norm(txt);const cores=(p.cores||[]).map(c=>c.nome);
+ const ex=cores.find(c=>norm(c)===w);if(ex)return {cor:ex};
+ const ap=p.apelidos&&p.apelidos[w];const apc=ap&&cores.find(c=>norm(c)===norm(ap));if(apc)return {cor:apc,apelido:true};
+ const tw=w.split(/\s+/);let cand=cores.filter(c=>{const cw=norm(c).split(/\s+/);return tw.every(t=>cw.includes(t))});
+ if(cand.length===1)return {cor:cand[0],auto:true};
+ if(!cand.length){cand=cores.filter(c=>norm(c).includes(w)||w.includes(norm(c)));if(cand.length===1)return {cor:cand[0],auto:true}}
+ return {cor:null,sugestoes:cand}}
+
+function formLista(){
+ if(!lista('produtos').length){toast('Cadastre um produto primeiro','err');return}
+ let texto='',data=hoje(),obs='',P=null;const esc2={};
+ const passo1=()=>{abrir('Saída por lista de separação',`<form id="f" class="form" novalidate>
+  <p class="hint" style="margin:0">Cole a lista como você recebe: nome do produto, tamanho e as linhas com quantidade e cor (ex.: <span class="num">8 vermelho</span>).</p>
+  <label class="field"><span>Lista de separação</span><textarea id="ls-txt" rows="11" placeholder="Pérola&#10;&#10;PP (12)&#10;8 vermelho&#10;4 preto&#10;&#10;M (5)&#10;5 azul bebê" style="font-family:var(--f-mono);font-size:14px">${esc(texto)}</textarea></label>
+  <label class="btn sm" style="align-self:flex-start;cursor:pointer">Anexar arquivo .txt<input type="file" id="ls-arq" accept=".txt,.csv,text/plain" hidden></label>
+  <div class="row2"><label class="field"><span>Data da saída</span><input id="ls-data" type="date" value="${data}"></label>
+  <label class="field"><span>Observação <em>(opcional)</em></span><input id="ls-obs" value="${esc(obs)}" placeholder="Ex.: pedido Shopee, cliente" autocomplete="off"></label></div>
+  <p class="hint err" id="ls-err"></p>
+  <div class="form-foot"><button type="button" class="btn ghost" data-act="fechar">Cancelar</button><button class="btn primary">Conferir lista</button></div></form>`,b=>{
+   $('#ls-arq',b).onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$('#ls-txt',b).value=String(r.result||'')};r.readAsText(f,'utf-8')};
+   $('#f',b).onsubmit=e=>{e.preventDefault();texto=$('#ls-txt',b).value;data=$('#ls-data',b).value||hoje();obs=$('#ls-obs',b).value.trim();
+    const r=lerLista(texto);if(!r.grupos.length){$('#ls-err',b).textContent='Não encontrei nenhuma linha com quantidade e cor. Confira o texto colado.';return}
+    P=r;P.forcar=false;P.grupos.forEach(g=>{g.escolhas={}});passo2()}})};
+ const validar=()=>{const dem={};let pecas=0,linhas=0,problemas=0;
+  P.grupos.forEach(g=>{const p=S.produtos[g.pid];g.blocos.forEach(bl=>bl.itens.forEach(it=>{it.err='';it.aviso='';it.tipoErr='';
+   const r=resolverCor(p,it.txt);it.sug=r;it.escolha=g.escolhas[norm(it.txt)];it.cor=it.escolha!==undefined?it.escolha:r.cor;
+   it.tamUso=temTam(p)?bl.tam:null;
+   if(!p)it.err='Escolha o produto';
+   else if(temTam(p)&&!bl.tam)it.err='Sem tamanho na lista';
+   else if(temTam(p)&&!p.tamanhos.map(t=>t.toUpperCase()).includes(bl.tam)){it.err=`${p.nome} não tem tamanho ${bl.tam}`;it.tipoErr='tam'}
+   else if(!it.cor)it.err='Escolha a cor';
+   if(p&&!temTam(p)&&bl.tam)it.aviso='produto sem tamanhos';
+   if(temTam(p)&&bl.tam)it.tamUso=p.tamanhos.find(t=>t.toUpperCase()===bl.tam);
+   it.k=g.pid+'|'+norm(it.cor||'')+'|'+(it.tamUso||'');if(!it.err)dem[it.k]=(dem[it.k]||0)+it.qtd}))});
+  P.grupos.forEach(g=>g.blocos.forEach(bl=>bl.itens.forEach(it=>{if(it.err)return;const tem=qtdCor(g.pid,it.cor,it.tamUso||undefined);it.tem=tem;it.dem=dem[it.k];
+   if(dem[it.k]>tem){it.semEstoque=true;if(!P.forcar){it.err=tem>0?`Só há ${fmt(tem)} em estoque`:'Sem estoque';it.tipoErr='estoque'}}else it.semEstoque=false})));
+  let soEstoque=0,negativos=0;P.grupos.forEach(g=>g.blocos.forEach(bl=>bl.itens.forEach(it=>{if(it.err){problemas++;if(it.tipoErr==='estoque')soEstoque++}else{linhas++;pecas+=it.qtd;if(it.semEstoque)negativos++}})));
+  return {pecas,linhas,problemas,soEstoque,negativos}};
+ const optsCor=(p,it)=>{const cores=(p?.cores||[]).map(c=>c.nome);const sug=it.sug.sugestoes||[];
+  return `<option value="">Escolha a cor…</option>${sug.length&&!it.cor?`<optgroup label="Parecidas">${sug.map(c=>`<option value="${esc(c)}">${esc(cap(c))}</option>`).join('')}</optgroup><optgroup label="Todas">`:''}${cores.map(c=>`<option value="${esc(c)}" ${it.cor&&norm(it.cor)===norm(c)?'selected':''}>${esc(cap(c))}</option>`).join('')}${sug.length&&!it.cor?'</optgroup>':''}`};
+ const resumoCores=(g,gi,p)=>{const pal={};g.blocos.forEach(bl=>bl.itens.forEach(it=>{const w=norm(it.txt);(pal[w]=pal[w]||{txt:it.txt,qtd:0,it}).qtd+=it.qtd}));
+  const falta=Object.entries(pal).filter(([w,x])=>!x.it.cor),auto=Object.entries(pal).filter(([w,x])=>x.it.cor&&(x.it.sug.auto||x.it.sug.apelido||x.it.escolha)&&norm(x.it.cor)!==w);
+  if(!falta.length&&!auto.length)return '';
+  return `<div class="ls-cores">${falta.length?`<div class="lbl" style="color:var(--crit)">Escolha a cor (vale para todas as linhas)</div>${falta.map(([w,x])=>`<div class="ls-cor"><span><b>${esc(x.txt)}</b> <span class="num" style="color:var(--muted)">${fmt(x.qtd)} pç</span></span><select data-g="${gi}" data-w="${esc(w)}" aria-label="Cor para ${esc(x.txt)}">${optsCor(p,x.it)}</select></div>`).join('')}`:''}
+   ${auto.length?`<div class="lbl">Cores reconhecidas — confira</div><div class="chips">${auto.map(([w,x])=>`<span class="cchip">${esc(x.txt)} → ${sw(x.it.cor)}${esc(cap(x.it.cor))}</span>`).join('')}</div>`:''}</div>`};
+ const corpo=()=>{const v=validar();const prods=lista('produtos');
+  return `${P.grupos.map((g,gi)=>{const p=S.produtos[g.pid];const tot=soma(g.blocos.flatMap(bl=>bl.itens.map(i=>i.qtd)));
+   return `<section class="lsg">
+    <div class="lsg-h"><select data-g="${gi}" class="ls-prod" aria-label="Produto">${p?'':`<option value="">"${esc(g.titulo||'Sem produto')}" — escolha o produto…</option>`}${prods.map(x=>`<option value="${x.id}" ${x.id===g.pid?'selected':''}>${esc(x.nome)}</option>`).join('')}</select><span class="num lsg-t">${fmt(tot)} pç</span></div>
+    ${p?resumoCores(g,gi,p):''}
+    ${g.blocos.map(bl=>{const s=soma(bl.itens.map(i=>i.qtd));const dif=bl.declarado!=null&&bl.declarado!==s;
+     return `<div class="lsb">${bl.tam||bl.declarado!=null?`<div class="lsb-h"><span class="tm">${esc(bl.tam||'?')}</span><span class="num">${fmt(s)} pç</span>${dif?`<span class="ls-warn">a lista diz ${fmt(bl.declarado)}</span>`:''}${p&&temTam(p)&&bl.tam&&!p.tamanhos.map(t=>t.toUpperCase()).includes(bl.tam)?`<button type="button" class="btn sm" data-addtam="${esc(bl.tam)}" data-pid="${p.id}" style="margin-left:auto">Adicionar ${esc(bl.tam)} ao ${esc(p.nome)}</button>`:''}</div>`:''}
+      ${bl.itens.map(it=>`<div class="lsi ${it.err?'bad':''}"><span class="num lsi-q">${fmt(it.qtd)}</span><span class="lsi-t">${esc(it.txt)}</span><span class="lsi-c">${it.cor?sw(it.cor):'<i class="sw" style="--sw:transparent"></i>'}<select data-i="${it.linha}" aria-label="Cor para ${esc(it.txt)}">${optsCor(p,it)}</select></span>
+       <span class="lsi-s">${it.err?`<b>${esc(it.err)}</b>`:`${it.semEstoque?'<b style="color:var(--warn)">':''}${fmt(it.tem)} → ${fmt(it.tem-it.dem)}${it.semEstoque?' (negativo)</b>':''}${it.aviso?' · '+esc(it.aviso):''}`}</span></div>`).join('')}</div>`}).join('')}</section>`}).join('')}
+   ${P.ignoradas.length?`<p class="hint err">Linhas que não entendi e foram ignoradas: ${P.ignoradas.map(x=>`<span class="num">${esc(x.txt)}</span>`).join(', ')}</p>`:''}
+   <div class="sumline"><span>${v.problemas?`<b style="color:var(--crit);font-family:var(--f-body);font-size:13.5px">${v.problemas} linha${v.problemas>1?'s':''} com problema</b> · `:''}Saída de</span><b>${fmt(v.pecas)} peças</b></div>
+   ${v.soEstoque||P.forcar?`<label class="check" style="background:var(--warn-soft)"><input type="checkbox" id="ls-forcar" ${P.forcar?'checked':''}><span><b>Registrar mesmo sem estoque suficiente.</b> Use quando as peças saíram de verdade, mas o estoque do app está desatualizado. O estoque fica negativo até você lançar a entrada que faltou.</span></label>`:''}
+   ${v.problemas&&v.linhas?`<p class="hint">As linhas com problema não serão registradas. Corrija acima ou registre só o que está OK.</p>`:''}`};
+ const passo2=()=>{abrir('Conferir lista de separação',`<div class="form"><div id="ls-corpo"></div>
+   <div class="form-foot"><button type="button" class="btn ghost" id="ls-voltar">Voltar e editar</button><button class="btn primary" id="ls-ok"></button></div></div>`,b=>{
+   const desenhar=()=>{const c=$('#ls-corpo',b);c.innerHTML=corpo();const v=validar();const ok=$('#ls-ok',b);ok.disabled=!v.linhas;ok.textContent=v.problemas&&v.linhas?`Registrar só ${v.linhas} linha${v.linhas>1?'s':''} OK`:`Registrar saída de ${fmt(v.pecas)} peças`};
+   desenhar();
+   $('#ls-corpo',b).addEventListener('change',e=>{const s=e.target;
+    if(s.classList.contains('ls-prod')){const g=P.grupos[+s.dataset.g];g.pid=s.value||null;g.escolhas={};desenhar();return}
+    if(s.id==='ls-forcar'){P.forcar=s.checked;desenhar();return}
+    if(s.dataset.w!=null){P.grupos[+s.dataset.g].escolhas[s.dataset.w]=s.value||null;desenhar();return}
+    if(s.dataset.i){for(const g of P.grupos){const it=g.blocos.flatMap(bl=>bl.itens).find(x=>String(x.linha)===s.dataset.i);if(it){g.escolhas[norm(it.txt)]=s.value||null;desenhar();break}}}});
+   $('#ls-corpo',b).addEventListener('click',e=>{const x=e.target.closest('[data-addtam]');if(!x)return;const t=x.dataset.addtam,pid=x.dataset.pid;
+    ajustarDoc('produtos',pid,p=>{if((p.tamanhos||[]).map(v=>v.toUpperCase()).includes(t))return p;return {...p,tamanhos:ordenarTams([...(p.tamanhos||[]),t]),cores:(p.cores||[]).map(c=>({...c,tam:{...(c.tam||{}),[t]:0}}))}});
+    toast(`Tamanho ${t} adicionado ao ${S.produtos[pid].nome}`);desenhar()});
+   $('#ls-voltar',b).onclick=()=>passo1();
+   $('#ls-ok',b).onclick=()=>{validar();const loteId='ls'+uid();const agora=Date.now();const movs=[];const porProd={};const apel={};
+    P.grupos.forEach(g=>{const p=S.produtos[g.pid];g.blocos.forEach(bl=>bl.itens.forEach(it=>{if(it.err)return;
+     const d={id:uid()+movs.length,produtoId:g.pid,produtoNome:p.nome,cor:it.cor,tipo:'saida',qtd:it.qtd,data,obs:obs||'Lista de separação',loteId,criadoEm:agora+movs.length};if(it.tamUso)d.tam=it.tamUso;movs.push(d);
+     (porProd[g.pid]=porProd[g.pid]||[]).push([it.cor,-it.qtd,it.tamUso||undefined]);
+     if(it.escolha&&norm(it.escolha)!==norm(it.txt)&&(!it.sug.cor||norm(it.sug.cor)!==norm(it.escolha))){(apel[g.pid]=apel[g.pid]||{})[norm(it.txt)]=it.escolha}}))});
+    if(!movs.length)return;
+    putMuitos('movimentos',movs);
+    Object.entries(porProd).forEach(([pid,ds])=>ajustarDoc('produtos',pid,p=>{let x=p;ds.forEach(([c,dl,t])=>{x=aplicarDelta(x,c,dl,t,P.forcar)});if(apel[pid])x={...x,apelidos:{...(x.apelidos||{}),...apel[pid]}};return x}));
+    fechar();toast(`Saída de ${fmt(soma(movs.map(m=>m.qtd)))} peças registrada (${movs.length} linhas)`)};
+  })};
+ passo1();
+}
+function excluirLote(loteId){const ms=Object.values(S.movimentos).filter(m=>m.loteId===loteId);if(!ms.length)return;const porProd={};
+ ms.forEach(m=>{(porProd[m.produtoId]=porProd[m.produtoId]||[]).push([m.cor,m.tipo==='entrada'?-m.qtd:m.qtd,m.tam])});
+ delMuitos('movimentos',ms.map(m=>m.id));
+ Object.entries(porProd).forEach(([pid,ds])=>{if(S.produtos[pid])ajustarDoc('produtos',pid,p=>{let x=p;ds.forEach(([c,dl,t])=>{x=aplicarDelta(x,c,dl,t,true)});return x})});
+ toast(`Lista excluída: ${fmt(soma(ms.map(m=>m.qtd)))} peças voltaram ao estoque`)}
 
 function proxNomeLeva(){let mx=0;Object.values(S.levas).forEach(l=>{const m=/(\d+)/.exec(l.nome||'');if(m)mx=Math.max(mx,+m[1])});return 'Leva '+(mx+1)}
 function formLeva(id){
@@ -838,8 +975,14 @@ const ACT={
  ir:(d,el,e)=>{e.preventDefault();ir(d.v)},
  novoProd:()=>formProduto(),editProd:d=>formProduto(d.id),
  delProd:d=>{const p=S.produtos[d.id];confirmar('Excluir produto',`Excluir <b>${esc(p.nome)}</b> e o estoque de todas as cores? O histórico de movimentações continua salvo.`,'Excluir produto',()=>{del('produtos',d.id);toast('Produto excluído')})},
- mov:d=>formMov(d.t,d.p),
- delMov:d=>{const m=S.movimentos[d.id];confirmar('Excluir movimentação',`Excluir a ${m.tipo==='entrada'?'entrada':'saída'} de <b>${fmt(m.qtd)}</b> peça(s) ${rotulo(m.cor,m.tam)}? O estoque de ${esc(m.produtoNome||'')} volta ao que era antes.`,'Excluir e desfazer',()=>{del('movimentos',d.id);ajustarEstoque(m.produtoId,m.cor,m.tipo==='entrada'?-m.qtd:m.qtd,m.tam);toast('Movimentação excluída')})},
+ mov:d=>formMov(d.t,d.p),lista:()=>formLista(),
+ delMov:d=>{const m=S.movimentos[d.id];const lote=m.loteId?Object.values(S.movimentos).filter(x=>x.loteId===m.loteId):[];
+  const txt=`Excluir a ${m.tipo==='entrada'?'entrada':'saída'} de <b>${fmt(m.qtd)}</b> peça(s) ${rotulo(m.cor,m.tam)} de ${esc(m.produtoNome||'')}? O estoque volta ao que era antes.`;
+  const um=()=>{del('movimentos',d.id);ajustarEstoque(m.produtoId,m.cor,m.tipo==='entrada'?-m.qtd:m.qtd,m.tam,true);toast('Movimentação excluída')};
+  if(lote.length<2)return confirmar('Excluir movimentação',txt,'Excluir e desfazer',um);
+  abrir('Excluir movimentação',`<div class="form"><p style="margin:0">${txt}</p><p class="hint" style="margin:0">Esta saída faz parte de uma lista de separação com ${lote.length} linhas (${fmt(soma(lote.map(x=>x.qtd)))} peças).</p>
+   <div class="form-foot"><button class="btn ghost" data-act="fechar">Cancelar</button><button class="btn" id="c-um">Excluir só esta</button><button class="btn danger" id="c-todos">Excluir a lista inteira</button></div></div>`,b=>{
+   $('#c-um',b).onclick=()=>{um();fechar()};$('#c-todos',b).onclick=()=>{excluirLote(m.loteId);fechar()}})},
  novaLeva:()=>formLeva(),editLeva:d=>formLeva(d.id),receber:d=>receber(d.id),
  delLeva:d=>{const l=S.levas[d.id];const devolve=l.status!=='recebida'&&l.tecidoId&&S.tecidos[l.tecidoId]&&l.metrosUsados>0;
   confirmar('Excluir leva',`Excluir <b>${esc(l.nome)}</b> (${esc(l.costureira)})?${devolve?` Os ${fmt(l.metrosUsados)} de tecido usados voltam para o estoque de ${esc(l.tecidoNome)}.`:''}${l.estoqueLancado?' As peças já lançadas no estoque continuam lá.':''}`,'Excluir leva',()=>{if(devolve)ajustarTecido(l.tecidoId,l.metrosUsados);del('levas',d.id);toast('Leva excluída')})},
